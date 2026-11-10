@@ -18,6 +18,7 @@ jobs:
         run: |
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          node -e "const j=require(process.env.GOOGLE_APPLICATION_CREDENTIALS);console.log('진단: client_email='+j.client_email+' project_id='+j.project_id)"
           npx --yes firebase-tools@13 deploy --only firestore:rules --project yeris-eng-booking --non-interactive
           rm -f "$RUNNER_TEMP/sa.json"
 
