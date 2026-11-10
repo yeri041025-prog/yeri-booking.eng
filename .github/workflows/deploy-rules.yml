@@ -13,11 +13,35 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - name: Firestore 규칙 게시
+      - name: Firestore 규칙 게시 (규칙 검사 권한 없이 만들기+게시)
         env:
-          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/sa.json"
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
-          npx --yes firebase-tools@13 deploy --only firestore:rules --project yeris-eng-booking --non-interactive
-          rm -f "$RUNNER_TEMP/sa.json"
+          mkdir -p "$RUNNER_TEMP/pub" && cd "$RUNNER_TEMP/pub" && npm init -y >/dev/null && npm i google-auth-library@9 >/dev/null 2>&1
+          cp "$GITHUB_WORKSPACE/firestore.rules" ./firestore.rules
+          cat > pub.js <<'JS'
+          const fs = require('fs');
+          const { GoogleAuth } = require('google-auth-library');
+          (async () => {
+            const cred = JSON.parse(process.env.SA);
+            const P = cred.project_id;
+            const auth = new GoogleAuth({ credentials: cred, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+            const c = await auth.getClient();
+            const base = 'https://firebaserules.googleapis.com/v1/projects/' + P;
+            const content = fs.readFileSync('firestore.rules', 'utf8');
+            const rs = await c.request({ url: base + '/rulesets', method: 'POST', data: { source: { files: [{ name: 'firestore.rules', content }] } } });
+            const rulesetName = rs.data.name;
+            console.log('규칙 세트 생성:', rulesetName);
+            const relName = 'projects/' + P + '/releases/cloud.firestore';
+            try {
+              await c.request({ url: base + '/releases/cloud.firestore', method: 'PATCH', data: { release: { name: relName, rulesetName } } });
+              console.log('게시 완료(업데이트)');
+            } catch (e) {
+              if (e.response && e.response.status === 404) {
+                await c.request({ url: base + '/releases', method: 'POST', data: { name: relName, rulesetName } });
+                console.log('게시 완료(새로 만듦)');
+              } else throw e;
+            }
+          })().catch(e => { console.error('게시 실패:', e.response ? e.response.status + ' ' + JSON.stringify(e.response.data).slice(0, 1500) : e.message); process.exit(1); });
+          JS
+          node pub.js
