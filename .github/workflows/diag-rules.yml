@@ -1,0 +1,33 @@
+# 진단용(수동 실행): 서비스 계정이 Firebase Rules API를 부를 때 구글이 돌려주는 거절 이유를 그대로 보여줍니다. (키/토큰은 출력하지 않음)
+name: diag-rules
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: 진단
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          mkdir d && cd d && npm init -y >/dev/null && npm i google-auth-library@9 >/dev/null 2>&1
+          cat > t.js <<'JS'
+          const { GoogleAuth } = require('google-auth-library');
+          (async () => {
+            const cred = JSON.parse(process.env.SA);
+            console.log('계정:', cred.client_email, '프로젝트:', cred.project_id);
+            const auth = new GoogleAuth({ credentials: cred, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+            const c = await auth.getClient();
+            const P = 'yeris-eng-booking';
+            const call = async (name, url, body) => {
+              try { const r = await c.request({ url, method: 'POST', data: body }); console.log(name, '->', r.status, JSON.stringify(r.data).slice(0, 600)); }
+              catch (e) { console.log(name, '-> 실패', e.response ? e.response.status : '', JSON.stringify(e.response && e.response.data).slice(0, 900)); }
+            };
+            await call('프로젝트 권한 확인', `https://cloudresourcemanager.googleapis.com/v1/projects/${P}:testIamPermissions`,
+              { permissions: ['firebaserules.rulesets.test', 'firebaserules.rulesets.create', 'firebaserules.releases.update', 'serviceusage.services.use', 'datastore.databases.get'] });
+            await call('규칙 검사(:test)', `https://firebaserules.googleapis.com/v1/projects/${P}:test`,
+              { source: { files: [{ name: 'firestore.rules', content: "rules_version = '2';\nservice cloud.firestore { match /databases/{d}/documents { match /{x=**} { allow read: if false; } } }" }] } });
+          })();
+          JS
+          node t.js
