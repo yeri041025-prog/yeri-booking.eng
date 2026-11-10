@@ -89,16 +89,17 @@ function cancelButtons(r) {
 function renderSession(day, slot) {
   const rows = rowsOf(day.date, slot.id), n = rows.length, st = statusOf(n, slot.cap);
   const k = key(day.date, slot.id), isOpen = true;
-  let seats = ''; for (let i = 0; i < slot.cap; i++) seats += '<span class="seat' + (i < n ? ' on' : '') + '"></span>';
+  const isAdminView = role === 'admin';
+  let seats = ''; if (isAdminView) for (let i = 0; i < slot.cap; i++) seats += '<span class="seat' + (i < n ? ' on' : '') + '"></span>';
   let h = '<div class="sess"><button class="shead" type="button" data-slot="' + esc(slot.id) + '" aria-expanded="' + isOpen + '">'
     + '<span class="time">' + esc(slot.start) + '–' + esc(slot.end) + '</span>'
     + '<span class="sinfo"><b>' + esc(slot.name) + '</b><small>' + esc(teacherName(sched, slot.teacher)) + '</small><span class="seats" aria-hidden="true">' + seats + '</span></span>'
-    + '<span class="count">' + n + '/' + slot.cap + '<span class="pill ' + st[0] + '">' + st[1] + '</span></span></button>';
+    + '<span class="count">' + (isAdminView ? n + '/' + slot.cap : n + '명') + '<span class="pill ' + st[0] + '">' + st[1] + '</span></span></button>';
   if (isOpen) {
     h += '<div class="sbody">';
     const canEdit = role === 'admin' || slot.teacher === myTeacher;
     h += canEdit
-      ? '<div class="topicrow"><label for="tp_' + esc(k) + '">이날의 주제</label><input id="tp_' + esc(k) + '" data-topic-in maxlength="60" value="' + esc(topics[k] || '') + '" placeholder="예: ～ようと思う 말하기 연습 (학생에게 보여요)"><button class="act" type="button" data-topic-save="' + esc(day.date + '|' + slot.id) + '">저장</button></div>'
+      ? '<div class="topicrow"><label for="tp_' + esc(k) + '">이날의 주제</label><input id="tp_' + esc(k) + '" data-topic-in maxlength="60" value="' + esc(topics[k] || '') + '" placeholder="예: 여행 영어 – 길 묻기 (학생에게 보여요)"><button class="act" type="button" data-topic-save="' + esc(day.date + '|' + slot.id) + '">저장</button></div>'
       : (topics[k] ? '<p class="topic"><b>이날의 주제</b>' + esc(topics[k]) + '</p>' : '');
     if (!rows.length) h += '<p class="empty">아직 예약이 없습니다.</p>';
     else {
@@ -240,7 +241,7 @@ function renderSchedule(preserve) {
   const list = slotList(sched).sort((a, b) => teacherName(sched, a.teacher).localeCompare(teacherName(sched, b.teacher), 'ko')
     || (a.start < b.start ? -1 : 1));
   let html = '<section class="panel"><h2>수업 목록</h2>';
-  if (!teacherIds(sched).length) html += '<p class="hint">먼저 "센세 관리" 탭에서 센세를 추가해주세요.</p>';
+  if (!teacherIds(sched).length) html += '<p class="hint">먼저 "teacher management" 탭에서 센세(TR)를 추가해주세요.</p>';
   if (!list.length) html += '<p class="empty">등록된 수업이 없습니다.</p>';
   else {
     const liOf = s => s.id === editing ? '<li class="editing" style="display:block">' + slotFormHtml() + '</li>' : '<li' + (s.to && s.to < today ? ' class="ended"' : '') + '><span class="info"><b>' + esc(s.name) + '</b><small>' + esc(teacherName(sched, s.teacher)) + ' · ' + esc(daysLabel(s.days)) + ' ' + esc(s.start) + '–' + esc(s.end) + ' · 정원 ' + esc(s.cap) + '명'
@@ -437,7 +438,7 @@ function renderTeachers(preserve) {
   const ids = teacherIds(sched);
   const emailsOf = id => staffDocs.filter(d => d.data().role === 'teacher' && d.data().teacher === id).map(d => d.id);
   const slotsOf = id => slotList(sched).filter(s => s.teacher === id).length;
-  let html = '<section class="panel"><h2>센세 목록</h2>';
+  let html = '<section class="panel"><h2>Teachers</h2>';
   if (!ids.length) html += '<p class="empty">등록된 센세가 없습니다.</p>';
   else {
     html += '<ul class="slotlist">' + ids.map(id => {
@@ -447,20 +448,20 @@ function renderTeachers(preserve) {
         : '<b>' + esc(teacherName(sched, id)) + '</b>';
       return '<li><span class="info">' + nameCell
         + '<small>수업 ' + slotsOf(id) + '개 · ' + (emails.length ? emails.map(e => esc(e) + ' <button class="act" type="button" data-delemail="' + esc(e) + '" aria-label="' + esc(e) + ' 로그인 권한 삭제">×</button>').join(' ') : '로그인 계정 없음 (수강생 화면에는 표시됩니다)') + '</small></span>'
-        + '<span class="btns"><button class="act" type="button" data-rename-start="' + esc(id) + '">이름 변경</button>'
+        + '<span class="btns"><button class="act" type="button" data-link-email="' + esc(id) + '">구글 이메일 연결</button><button class="act" type="button" data-rename-start="' + esc(id) + '">이름 변경</button>'
         + '<button class="act' + (confirmCancel['t_' + id] ? ' danger' : '') + '" type="button" data-delteacher="' + esc(id) + '">' + (confirmCancel['t_' + id] ? '삭제 확인' : '삭제') + '</button></span></li>';
     }).join('') + '</ul>';
   }
   html += '<p id="teacher-msg" class="msg" role="status"></p></section>';
 
-  html += '<section class="panel"><h2>센세 추가</h2><form id="teacher-form" class="row" autocomplete="off">'
+  html += '<section class="panel"><h2>Add teacher</h2><form id="teacher-form" class="row" autocomplete="off">'
     + '<label>이름<input id="tf-name" maxlength="20" required placeholder="예: 현TR"></label>'
     + '<label>구글 이메일 (선택)<input id="tf-email" type="email" placeholder="로그인해야 하는 센세만"></label>'
     + '<button class="primary" type="submit">추가</button></form>'
     + '<p class="hint">이메일을 넣으면 그 계정으로 로그인했을 때 본인 수업의 예약자만 볼 수 있습니다. 이메일 없이도 수강생 화면에는 이름이 나옵니다.</p></section>';
 
   if (ids.length) {
-    html += '<section class="panel"><h2>센세 로그인 계정 추가</h2><form id="email-form" class="row" autocomplete="off">'
+    html += '<section class="panel"><h2>Teacher login · Google email</h2><form id="email-form" class="row" autocomplete="off">'
       + '<label>센세<select id="ef-teacher">' + ids.map(id => '<option value="' + esc(id) + '">' + esc(teacherName(sched, id)) + '</option>').join('') + '</select></label>'
       + '<label>구글 이메일<input id="ef-email" type="email" required></label>'
       + '<button class="primary" type="submit">추가</button></form>'
@@ -634,6 +635,8 @@ document.addEventListener('click', async e => {
   }
   if (e.target.closest('#slot-new')) { editing = 'new'; renderSchedule(false); const f = $('sf-name'); if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); } return; }
   if (e.target.closest('#slot-cancel')) { editing = null; renderSchedule(false); return; }
+  const le = e.target.closest('[data-link-email]');
+  if (le) { const sel = $('ef-teacher'), inp = $('ef-email'); if (sel && inp) { sel.value = le.dataset.linkEmail; inp.scrollIntoView({ block: 'center' }); inp.focus(); } return; }
   const es = e.target.closest('[data-editslot]');
   if (es) { editing = es.dataset.editslot; renderSchedule(false); const f = document.querySelector('#view-schedule li.editing'); if (f) f.scrollIntoView({ block: 'center' }); return; }
   const ds = e.target.closest('[data-delslot]');
