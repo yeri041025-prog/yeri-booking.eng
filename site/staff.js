@@ -21,7 +21,7 @@ const thisMonth = today.slice(0, 7);
 let viewMonth = thisMonth;
 let role = null, myTeacher = null;     // role: 'admin' | 'teacher'
 let sched = null, schedLoaded = false;
-let bookings = [], staffDocs = [], members = [], topics = {};
+let bookings = [], staffDocs = [], members = [], topics = {}, rooms = {}, links = {};
 let memberSearch = '';
 let editingMember = null;              // null | 수강생 문서 이름
 let view = 'bookings';
@@ -98,13 +98,17 @@ function renderSession(day, slot) {
   if (isOpen) {
     h += '<div class="sbody">';
     const canEdit = role === 'admin' || slot.teacher === myTeacher;
+    const rm = rooms[k] || slot.room || '';
     h += canEdit
-      ? '<div class="topicrow"><label for="tp_' + esc(k) + '">이날의 주제</label><input id="tp_' + esc(k) + '" data-topic-in maxlength="60" value="' + esc(topics[k] || '') + '" placeholder="예: 여행 영어 – 길 묻기 (학생에게 보여요)"><button class="act" type="button" data-topic-save="' + esc(day.date + '|' + slot.id) + '">저장</button></div>'
-      : (topics[k] ? '<p class="topic"><b>이날의 주제</b>' + esc(topics[k]) + '</p>' : '');
+      ? '<div class="topicrow"><label for="rm_' + esc(k) + '">강의실</label><input id="rm_' + esc(k) + '" data-room-in maxlength="20" value="' + esc(rm) + '" placeholder="' + esc(slot.room || '예: 301호') + '"></div>'
+        + '<div class="topicrow"><label for="tp_' + esc(k) + '">이날의 주제</label><input id="tp_' + esc(k) + '" data-topic-in maxlength="60" value="' + esc(topics[k] || '') + '" placeholder="예: 여행 영어 – 길 묻기 (학생에게 보여요)"><button class="act" type="button" data-topic-save="' + esc(day.date + '|' + slot.id) + '">저장</button></div>'
+        + (slot.online !== false ? (loadLinks(day.date, slot.id), '') + '<div class="topicrow"><label for="lk_' + esc(k) + '">접속 링크</label><input id="lk_' + esc(k) + '" data-link-in type="url" maxlength="300" value="' + esc(links[k] || links['default_' + slot.id] || '') + '" placeholder="https://zoom.us/j/..."><button class="act" type="button" data-link-save="' + esc(day.date + '|' + slot.id) + '">이날만</button><button class="act" type="button" data-link-save="default|' + esc(slot.id) + '">계속 사용</button></div><p class="hint">예약한 학생에게만 화면에 보입니다. "계속 사용"은 이 수업의 기본 링크로 저장돼요.</p>' : '')
+        + '<p class="hint">강의실을 바꾸면(보강 등) 그날 수업만 바뀌고, 학생 화면에도 바로 보입니다. 기본 강의실로 되돌리려면 기본값과 같게 적거나 비우세요.</p>'
+      : ((rm ? '<p class="topic"><b>강의실</b>' + esc(rm) + '</p>' : '') + (topics[k] ? '<p class="topic"><b>이날의 주제</b>' + esc(topics[k]) + '</p>' : ''));
     if (!rows.length) h += '<p class="empty">아직 예약이 없습니다.</p>';
     else {
       h += '<ul class="roster">' + rows.map(r =>
-        '<li><span class="nm">' + esc(r.name) + '<small>' + esc(r.last4) + '</small></span>'
+        '<li><span class="nm">' + esc(r.name) + '<small>' + esc(r.last4) + '</small>' + (r.mode === 'online' ? '<small class="onl">💻 온라인</small>' : '') + '</span>'
         + (role === 'admin' ? cancelButtons(r) : '')
         + '</li>').join('') + '</ul>';
     }
@@ -228,6 +232,8 @@ function slotFormHtml() {
     + '<div class="grid2"><label>적용 시작일 (비우면 계속)<input id="sf-from" type="date" value="' + esc(cur.from || '') + '"></label>'
     + '<label>적용 종료일 (비우면 계속)<input id="sf-to" type="date" value="' + esc(cur.to || '') + '"></label></div>'
     + '<p class="hint">달이 바뀌면서 시간이 달라지는 수업은, 지난 시간표 수업의 종료일을 말일로 하고 새 수업을 다음 달 1일 시작으로 추가하세요. 그러면 이번 달 수업은 그대로 유지됩니다.</p>'
+    + '<label class="chk"><input type="checkbox" id="sf-online"' + (cur.online !== false ? ' checked' : '') + '> 온라인 참여 가능 (학생이 예약할 때 현장/온라인 선택)</label>'
+    + '<label>기본 강의실<input id="sf-room" maxlength="20" placeholder="예: 301호" value="' + esc(cur.room || '') + '"></label>'
     + '<div class="grid2"><label>시작<input id="sf-start" type="time" required value="' + esc(cur.start) + '"></label>'
     + '<label>끝<input id="sf-end" type="time" required value="' + esc(cur.end) + '"></label></div>'
     + '<div class="btnrow"><button class="primary" type="submit">' + (isNew ? '수업 추가' : '수정 저장') + '</button>'
@@ -244,7 +250,7 @@ function renderSchedule(preserve) {
   if (!teacherIds(sched).length) html += '<p class="hint">먼저 "teacher management" 탭에서 센세(TR)를 추가해주세요.</p>';
   if (!list.length) html += '<p class="empty">등록된 수업이 없습니다.</p>';
   else {
-    const liOf = s => s.id === editing ? '<li class="editing" style="display:block">' + slotFormHtml() + '</li>' : '<li' + (s.to && s.to < today ? ' class="ended"' : '') + '><span class="info"><b>' + esc(s.name) + '</b><small>' + esc(teacherName(sched, s.teacher)) + ' · ' + esc(daysLabel(s.days)) + ' ' + esc(s.start) + '–' + esc(s.end) + ' · 정원 ' + esc(s.cap) + '명'
+    const liOf = s => s.id === editing ? '<li class="editing" style="display:block">' + slotFormHtml() + '</li>' : '<li' + (s.to && s.to < today ? ' class="ended"' : '') + '><span class="info"><b>' + esc(s.name) + '</b><small>' + esc(teacherName(sched, s.teacher)) + ' · ' + esc(daysLabel(s.days)) + ' ' + esc(s.start) + '–' + esc(s.end) + ' · 정원 ' + esc(s.cap) + '명' + (s.online === false ? ' · 현장만' : ' · 💻온라인 가능') + (s.room ? ' · ' + esc(s.room) : '')
       + (s.from || s.to ? ' · 적용 ' + esc(s.from ? dotDate(s.from) : '처음') + ' ~ ' + esc(s.to ? dotDate(s.to) : '계속') : '') + '</small></span>'
       + '<span class="btns"><button class="act" type="button" data-editslot="' + esc(s.id) + '">수정</button>'
       + '<button class="act' + (confirmCancel['slot_' + s.id] ? ' danger' : '') + '" type="button" data-delslot="' + esc(s.id) + '">' + (confirmCancel['slot_' + s.id] ? '삭제 확인' : '삭제') + '</button></span></li>';
@@ -290,6 +296,8 @@ async function saveSlot() {
   const before = isNew ? null : sched.slots[id];
   const next = clone(sched);
   next.slots[id] = { name, teacher, cap, days, start, end };
+  const room = $('sf-room').value.trim().slice(0, 20); if (room) next.slots[id].room = room;
+  if (!$('sf-online').checked) next.slots[id].online = false;
   if (from) next.slots[id].from = from;
   if (to) next.slots[id].to = to;
   try {
@@ -520,7 +528,7 @@ function startData() {
     bookings = snap.docs.map(d => ({ id: d.id, ...d.data() })); showNotice(''); renderAll(true);
   }, () => showNotice('예약 목록을 불러오지 못했습니다. 권한이나 설정을 확인해주세요.'));
   unsubTopics = onSnapshot(query(collection(db, 'topics'), where('date', '>=', shiftMonth(thisMonth, -2) + '-01')), snap => {
-    const m = {}; snap.docs.forEach(d => { const v = d.data(); if (v.text) m[d.id] = v.text; }); topics = m; renderAll(true);
+    const m = {}, r = {}; snap.docs.forEach(d => { const v = d.data(); if (v.text) m[d.id] = v.text; if (v.room) r[d.id] = v.room; }); topics = m; rooms = r; renderAll(true);
   }, () => {});
   if (role === 'admin') {
     unsubStaff = onSnapshot(collection(db, 'staff'), snap => { staffDocs = snap.docs; renderAll(true); }, () => {});
@@ -575,20 +583,48 @@ const imp = initImport({
   callAI: payload => httpsCallable(getFunctions(app, 'asia-northeast3'), 'readDocument', { timeout: 120000 })(payload).then(r => r.data)
 });
 
+// 온라인 수업 접속 링크: 목록 조회는 막혀 있어서, 펼친 수업의 두 문서만 하나씩 읽어 옵니다.
+const linkAsked = {};
+async function loadLinks(date, slotId) {
+  const k = key(date, slotId);
+  if (linkAsked[k]) return; linkAsked[k] = true;
+  try {
+    for (const ref of [k, 'default_' + slotId]) { if (ref in links) continue; const sn = await getDoc(doc(db, 'links', ref)); links[ref] = sn.exists() ? (sn.data().url || '') : ''; }
+    renderAll(true);
+  } catch (e) { /* 권한이 없으면 입력칸만 비어 있습니다 */ }
+}
+
 /* ---------- 이벤트 ---------- */
 document.addEventListener('click', async e => {
   const tsv = e.target.closest('[data-topic-save]');
   if (tsv) {
     const [date, slotId] = tsv.dataset.topicSave.split('|'), id = key(date, slotId);
     const inp = document.getElementById('tp_' + id), text = inp.value.trim().slice(0, 60);
+    const rin = document.getElementById('rm_' + id), def = (sched.slots[slotId] && sched.slots[slotId].room) || '';
+    let room = rin ? rin.value.trim().slice(0, 20) : ''; if (room === def) room = '';  // 기본 강의실과 같으면 따로 저장하지 않음
     tsv.disabled = true;
     try {
-      if (text) await setDoc(doc(db, 'topics', id), { date, slot: slotId, text, by: userEmail, at: Date.now() });
+      if (text || room) { const dd = { date, slot: slotId, by: userEmail, at: Date.now() }; if (text) dd.text = text; if (room) dd.room = room; await setDoc(doc(db, 'topics', id), dd); }
       else await deleteDoc(doc(db, 'topics', id));
-      tsv.textContent = text ? '저장됨 ✓' : '지움 ✓';
+      tsv.textContent = (text || room) ? '저장됨 ✓' : '지움 ✓';
       setTimeout(() => { tsv.textContent = '저장'; }, 1500);
     } catch (err) { alert('저장하지 못했습니다. 이 수업의 담당 센세·관리자만 입력할 수 있어요.'); }
     tsv.disabled = false; return;
+  }
+  const lsv = e.target.closest('[data-link-save]');
+  if (lsv) {
+    const [d0, slotId] = lsv.dataset.linkSave.split('|'), isDef = d0 === 'default';
+    const ref = isDef ? 'default_' + slotId : key(d0, slotId);
+    const inp = lsv.closest('.sbody').querySelector('[data-link-in]');
+    const url = inp.value.trim();
+    if (url && !/^https:\/\/[^\s]+$/.test(url)) { alert('https:// 로 시작하는 주소를 입력해주세요.'); return; }
+    lsv.disabled = true;
+    try {
+      if (url) await setDoc(doc(db, 'links', ref), isDef ? { slot: slotId, url, by: userEmail, at: Date.now() } : { date: d0, slot: slotId, url, by: userEmail, at: Date.now() });
+      else await deleteDoc(doc(db, 'links', ref));
+      links[ref] = url; const t0 = lsv.textContent; lsv.textContent = '저장됨 ✓'; setTimeout(() => { lsv.textContent = t0; }, 1500);
+    } catch (err) { alert('저장하지 못했습니다. 이 수업의 담당 센세·관리자만 입력할 수 있어요.'); }
+    lsv.disabled = false; return;
   }
   const pick = e.target.closest('[data-pick]');
   if (pick) { openDate = pick.dataset.pick; openSlot = null; renderAll(false); return; }
